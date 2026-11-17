@@ -79,6 +79,12 @@
     <div class="status" id="projStatus"></div>
   </section>
 
+  <section class="card hidden" id="cleanupCard">
+    <h2>Projetos parados há 7 dias ou mais</h2>
+    <p class="hint">Estes projetos não são mexidos há uma semana. Apagar libera espaço no aparelho. Manter segura o aviso por mais 7 dias. Nada é apagado sozinho.</p>
+    <div class="seglist" id="cleanupList"></div>
+  </section>
+
   <section class="card" id="cardKey">
     <h2>1. Sua chave da OpenAI</h2>
     <p class="hint">Serve só para a legenda automática. A chave fica salva apenas neste aparelho, neste navegador. Sem chave, o corte de silêncios continua funcionando.</p>
@@ -264,10 +270,47 @@ async function duplicateProject(id){
   renderProjects();
   setStatus($("projStatus"), "Cópia criada: " + copy.name + ". Toque em Editar nela para mexer sem tocar no original.", "ok");
 }
+const CLEAN_AFTER_DAYS = 7;
+function projectsToClean(arr, now){
+  const limit = CLEAN_AFTER_DAYS * 86400000;
+  return arr.filter(p => (now - (p.updatedAt || 0)) > limit && (p.snoozeUntil || 0) < now);
+}
+function keepProject(id){
+  const arr = readProjects();
+  const p = arr.find(x => x.id === id);
+  if(p){ p.snoozeUntil = Date.now() + CLEAN_AFTER_DAYS * 86400000; writeProjects(arr); }
+  renderCleanup();
+}
+function renderCleanup(){
+  const old = projectsToClean(readProjects(), Date.now());
+  const card = $("cleanupCard"), list = $("cleanupList");
+  if(!old.length){ card.classList.add("hidden"); list.innerHTML = ""; return; }
+  card.classList.remove("hidden");
+  list.innerHTML = "";
+  old.forEach(p => {
+    const days = Math.floor((Date.now() - (p.updatedAt || 0)) / 86400000);
+    const div = document.createElement("div");
+    div.className = "seg";
+    const info = document.createElement("div");
+    info.className = "txt";
+    info.textContent = p.name + ", parado há " + days + " dias, ocupa " + ((p.fileSize || 0) / 1048576).toFixed(1) + " MB do vídeo original.";
+    const btns = document.createElement("div");
+    btns.style.display = "flex"; btns.style.flexDirection = "column"; btns.style.gap = "6px";
+    const bDel = document.createElement("button");
+    bDel.className = "btn sec small"; bDel.style.width = "auto"; bDel.style.marginTop = "0"; bDel.textContent = "Apagar";
+    bDel.addEventListener("click", () => deleteProject(p.id));
+    const bKeep = document.createElement("button");
+    bKeep.className = "btn sec small"; bKeep.style.width = "auto"; bKeep.style.marginTop = "0"; bKeep.textContent = "Manter";
+    bKeep.addEventListener("click", () => keepProject(p.id));
+    btns.appendChild(bDel); btns.appendChild(bKeep);
+    div.appendChild(info); div.appendChild(btns);
+    list.appendChild(div);
+  });
+}
 function renderProjects(){
   const arr = readProjects();
   const card = $("projectsCard"), list = $("projList");
-  if(!arr.length){ card.classList.add("hidden"); list.innerHTML = ""; return; }
+  if(!arr.length){ card.classList.add("hidden"); list.innerHTML = ""; renderCleanup(); return; }
   card.classList.remove("hidden");
   list.innerHTML = "";
   arr.forEach(p => {
@@ -296,6 +339,7 @@ function renderProjects(){
     div.appendChild(info); div.appendChild(btns);
     list.appendChild(div);
   });
+  renderCleanup();
 }
 
 // ===LOGICA PURA INICIO===
