@@ -88,9 +88,16 @@
   <section class="card" id="cardKey">
     <h2>1. Sua chave da OpenAI</h2>
     <p class="hint">Serve só para a legenda automática. A chave fica salva apenas neste aparelho, neste navegador. Sem chave, o corte de silêncios continua funcionando.</p>
-    <label class="lbl" for="apiKey">Chave da API (começa com sk)</label>
-    <input type="password" id="apiKey" placeholder="sk..." autocomplete="off">
-    <button class="btn sec" id="saveKeyBtn" type="button">Salvar chave neste aparelho</button>
+    <div id="keySaved" class="hidden">
+      <div class="status ok">Chave salva neste aparelho, a legenda automática está pronta.</div>
+      <button class="btn sec" id="keyEditBtn" type="button">Alterar chave API</button>
+    </div>
+    <div id="keyForm">
+      <label class="lbl" for="apiKey">Chave da API (começa com sk)</label>
+      <input type="password" id="apiKey" placeholder="sk..." autocomplete="off">
+      <button class="btn sec" id="saveKeyBtn" type="button">Salvar chave neste aparelho</button>
+      <button class="btn sec hidden" id="keyCancelBtn" type="button">Cancelar</button>
+    </div>
     <div class="status" id="keyStatus"></div>
     <span class="pill">Onde pegar: platform.openai.com, em API keys</span>
   </section>
@@ -147,7 +154,7 @@
 
   <section class="card hidden" id="cardExport">
     <h2>5. Exportar o vídeo final</h2>
-    <p class="hint">A exportação toca o vídeo uma vez já cortado e grava o resultado, com a legenda desenhada. Mantenha a tela ligada e nesta página até terminar.</p>
+    <p class="hint">A exportação toca o vídeo uma vez já cortado e grava o resultado, com a legenda desenhada. Ela leva mais ou menos o tempo do vídeo final, é o jeito que funciona no navegador. Mantenha a tela ligada e nesta página até terminar.</p>
     <button class="btn" id="exportBtn" type="button">Exportar vídeo</button>
     <div class="status" id="exportStatus"></div>
     <div id="downloads"></div>
@@ -156,8 +163,22 @@
     <div id="mp4Downloads"></div>
   </section>
 
+  <section class="card" id="cloudCard">
+    <h2>6. Nuvem, seus projetos na Cloudflare</h2>
+    <p class="hint">Com a nuvem ligada, seus projetos ficam salvos também na sua Cloudflare: trocou de celular ou limpou o navegador, eles continuam lá. Funciona só neste endereço da Cloudflare, depois que as ligações forem feitas no painel. Sem o código, a página continua salvando só no aparelho, como sempre.</p>
+    <label for="cloudKey">Seu código de acesso da nuvem</label>
+    <input type="password" id="cloudKey" placeholder="O mesmo código criado no painel da Cloudflare" autocomplete="off">
+    <button class="btn sec" id="cloudSaveKeyBtn" type="button">Guardar o código neste aparelho</button>
+    <label style="display:flex; align-items:center; gap:10px; margin-top:14px"><input type="checkbox" id="cloudAuto" style="width:22px; height:22px" checked> Enviar sozinho a cada salvamento</label>
+    <button class="btn sec" id="cloudPushBtn" type="button">Enviar o projeto aberto agora</button>
+    <button class="btn sec" id="cloudListBtn" type="button">Ver projetos na nuvem</button>
+    <div class="status" id="cloudStatus"></div>
+    <div class="seglist" id="cloudList"></div>
+    <p class="hint">Apagar um projeto aqui do aparelho não apaga a cópia da nuvem. Para apagar da nuvem, use o botão Apagar da nuvem na lista acima.</p>
+  </section>
+
   <footer>
-    Seu vídeo não sai do aparelho. A única coisa enviada para fora é o áudio, na hora da transcrição, para a OpenAI, usando a sua chave. O corte de silêncios e a exportação acontecem aqui dentro do navegador. Os projetos salvos moram neste navegador, neste endereço de página: se limpar os dados do navegador ou mudar o endereço da página, eles não acompanham. Baixe sempre o vídeo final que for usar.
+    Sem a nuvem, seu vídeo não sai do aparelho: a única coisa enviada para fora é o áudio, na hora da transcrição, para a OpenAI, usando a sua chave. Com a nuvem ligada na seção 6, os projetos também são enviados para a sua Cloudflare, com o seu código. O corte de silêncios e a exportação acontecem aqui dentro do navegador. Os projetos salvos no aparelho moram neste navegador, neste endereço de página: se limpar os dados do navegador ou mudar o endereço da página, os do aparelho não acompanham, os da nuvem acompanham. Baixe sempre o vídeo final que for usar.
   </footer>
 </div>
 <script>
@@ -242,6 +263,7 @@ function saveProject(){
   const hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0");
   setStatus($("saveStatus"), "Projeto salvo neste aparelho às " + hh + ":" + mm + ". Pode fechar e continuar depois.", "ok");
   renderProjects();
+  scheduleCloudSync();
 }
 async function deleteProject(id){
   writeProjects(readProjects().filter(p => p.id !== id));
@@ -486,14 +508,28 @@ function rangeAt(t, ranges){
 
 // ---------- chave ----------
 const KEY_NAME = "cortaSilencio_openai_key";
+function renderKeyState(editing){
+  const has = !!store.get(KEY_NAME);
+  $("keyForm").classList.toggle("hidden", has && !editing);
+  $("keySaved").classList.toggle("hidden", !has || !!editing);
+  $("keyCancelBtn").classList.toggle("hidden", !(has && editing));
+}
 (function initKey(){
   const saved = store.get(KEY_NAME);
-  if(saved){ $("apiKey").value = saved; setStatus($("keyStatus"), "Chave salva neste aparelho.", "ok"); }
+  if(saved) $("apiKey").value = saved;
+  renderKeyState(false);
 })();
+$("keyEditBtn").addEventListener("click", () => { renderKeyState(true); $("apiKey").focus(); });
+$("keyCancelBtn").addEventListener("click", () => {
+  $("apiKey").value = store.get(KEY_NAME) || "";
+  renderKeyState(false);
+  setStatus($("keyStatus"), "", "");
+});
 $("saveKeyBtn").addEventListener("click", () => {
   const v = $("apiKey").value.trim();
   if(!v){ setStatus($("keyStatus"), "Cole a chave primeiro.", "err"); return; }
   store.set(KEY_NAME, v);
+  renderKeyState(false);
   setStatus($("keyStatus"), "Chave salva neste aparelho.", "ok");
 });
 function getKey(){ return ($("apiKey").value || store.get(KEY_NAME) || "").trim(); }
@@ -908,7 +944,7 @@ async function exportVideo(){
 
   const stream = canvas.captureStream(30);
   if(S.audioDest) S.audioDest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
-  const mimes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+  const mimes = ["video/mp4;codecs=avc1.640028,mp4a.40.2", "video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
   const mime = mimes.find(m => { try { return MediaRecorder.isTypeSupported(m); } catch(e){ return false; } }) || "";
   const rec = new MediaRecorder(stream, { mimeType: mime || undefined, videoBitsPerSecond: 10000000, audioBitsPerSecond: 192000 });
   const chunks = [];
@@ -1015,25 +1051,34 @@ $("mp4Btn").addEventListener("click", async () => {
   if(!S.webmBlob){ setStatus($("mp4Status"), "Exporte o vídeo primeiro.", "err"); return; }
   const btn = $("mp4Btn");
   btn.disabled = true;
+  const logs = [];
   try {
     setStatus($("mp4Status"), "Carregando o conversor, na primeira vez demora um pouco...");
-    if(!window.FFmpegWASM) await loadScript("https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.js");
-    if(!window.FFmpegUtil) await loadScript("https://unpkg.com/@ffmpeg/util@0.12.2/dist/umd/index.js");
+    if(!window.FFmpegWASM) await loadScript("https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.js");
+    if(!window.FFmpegUtil) await loadScript("https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.2/dist/umd/index.js");
     const { FFmpeg } = window.FFmpegWASM;
     const { toBlobURL, fetchFile } = window.FFmpegUtil;
     const ff = new FFmpeg();
+    ff.on("log", e => { if(e && e.message){ logs.push(e.message); if(logs.length > 6) logs.shift(); } });
     ff.on("progress", p => {
-      if(p && typeof p.progress === "number") setStatus($("mp4Status"), "Convertendo para MP4, " + Math.round(p.progress * 100) + "%...");
+      if(p && typeof p.progress === "number") setStatus($("mp4Status"), "Convertendo para MP4, " + Math.round(Math.min(1, p.progress) * 100) + "%...");
     });
-    const base = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
+    const base = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd";
     await ff.load({
       coreURL: await toBlobURL(base + "/ffmpeg-core.js", "text/javascript"),
       wasmURL: await toBlobURL(base + "/ffmpeg-core.wasm", "application/wasm")
     });
     await ff.writeFile("in.webm", await fetchFile(S.webmBlob));
-    const code = await ff.exec(["-i", "in.webm", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+    let code = await ff.exec(["-i", "in.webm", "-threads", "1", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "21",
       "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "out.mp4"]);
-    if(code !== 0) throw new Error("ffmpeg " + code);
+    if(code !== 0){
+      setStatus($("mp4Status"), "A conversão em tamanho cheio não aguentou neste aparelho. Tentando de novo em 720p, que o Instagram aceita igual...");
+      try { await ff.deleteFile("out.mp4"); } catch(e){}
+      code = await ff.exec(["-i", "in.webm", "-threads", "1", "-vf", "scale=w=if(gt(iw,ih),min(720,iw),-2):h=if(gt(iw,ih),-2,min(720,ih))",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "22",
+        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "out.mp4"]);
+    }
+    if(code !== 0) throw new Error("o conversor parou no meio, código " + code);
     const data = await ff.readFile("out.mp4");
     const blob = new Blob([data.buffer], { type: "video/mp4" });
     const a = document.createElement("a");
@@ -1049,10 +1094,165 @@ $("mp4Btn").addEventListener("click", async () => {
     }
     setStatus($("mp4Status"), "MP4 pronto, é o botão que apareceu acima.", "ok");
   } catch(err){
-    setStatus($("mp4Status"), "A conversão para MP4 falhou neste aparelho. O arquivo WebM acima continua valendo e abre no celular e no YouTube.", "err");
+    const detail = ((err && err.message) ? err.message : "erro desconhecido") + (logs.length ? " | " + logs[logs.length - 1] : "");
+    setStatus($("mp4Status"), "A conversão para MP4 falhou neste aparelho. Detalhe: " + detail + ". O arquivo WebM acima continua valendo e abre no celular e no YouTube. Se falhar de novo, me manda um print desta tela que o detalhe me diz o motivo.", "err");
   }
   btn.disabled = false;
 });
+
+// ---------- nuvem (Cloudflare) ----------
+const CLOUD_KEY_NAME = "cortaSilencio_cloud_key";
+const CLOUD_STATE_NAME = "cortaSilencio_cloud_state";
+let cloudTimer = null;
+function cloudKey(){ return (store.get(CLOUD_KEY_NAME) || "").trim(); }
+function cloudStateAll(){ try { return JSON.parse(store.get(CLOUD_STATE_NAME) || "{}"); } catch(e){ return {}; } }
+function cloudStateSave(all){ store.set(CLOUD_STATE_NAME, JSON.stringify(all)); }
+async function cloudApi(path, opts){
+  const key = cloudKey();
+  if(!key) throw new Error("sem_codigo");
+  const res = await fetch(path, Object.assign({}, opts || {}, {
+    headers: Object.assign({ "x-access-key": key }, (opts && opts.headers) || {})
+  }));
+  if(res.status === 401) throw new Error("Código da nuvem não bateu com o do painel. Confira o código guardado.");
+  if(res.status === 503) throw new Error("A nuvem ainda não foi ligada no painel da Cloudflare. Faltam as ligações do banco e do depósito, ou o código no painel.");
+  if(!res.ok) throw new Error("A nuvem respondeu erro " + res.status + ".");
+  return res;
+}
+async function cloudPushProject(id, quiet){
+  const meta = readProjects().find(p => p.id === id);
+  if(!meta) return;
+  const st = cloudStateAll();
+  const mine = st[id] || {};
+  if(mine.metaAt !== meta.updatedAt){
+    await cloudApi("/api/projects/" + id, {
+      method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(meta)
+    });
+    mine.metaAt = meta.updatedAt;
+  }
+  const video = await idbGet("video:" + id);
+  if(video && mine.videoSize !== video.size){
+    if(!quiet) setStatus($("cloudStatus"), "Enviando o vídeo original de " + meta.name + " para a nuvem, pode demorar conforme o tamanho...");
+    await cloudApi("/api/projects/" + id + "/video", {
+      method: "PUT", headers: { "content-type": video.type || "video/mp4" }, body: video
+    });
+    mine.videoSize = video.size;
+  }
+  const fin = await idbGet("final:" + id);
+  if(fin && mine.finalSize !== fin.size){
+    if(!quiet) setStatus($("cloudStatus"), "Enviando o vídeo final de " + meta.name + " para a nuvem...");
+    await cloudApi("/api/projects/" + id + "/final", {
+      method: "PUT", headers: { "content-type": fin.type || "video/mp4" }, body: fin
+    });
+    mine.finalSize = fin.size;
+  }
+  st[id] = mine;
+  cloudStateSave(st);
+}
+function scheduleCloudSync(){
+  if(!cloudKey() || !$("cloudAuto").checked || !currentProjId) return;
+  if(cloudTimer) clearTimeout(cloudTimer);
+  const id = currentProjId;
+  cloudTimer = setTimeout(async () => {
+    try {
+      await cloudPushProject(id, true);
+      setStatus($("cloudStatus"), "Projeto enviado para a nuvem.", "ok");
+    } catch(e){
+      setStatus($("cloudStatus"), "Nuvem: " + e.message, "err");
+    }
+  }, 6000);
+}
+async function cloudDownloadProject(id){
+  setStatus($("cloudStatus"), "Baixando o projeto da nuvem para este aparelho...");
+  const res = await cloudApi("/api/projects/" + id);
+  const meta = await res.json();
+  const arr = readProjects();
+  const idx = arr.findIndex(p => p.id === id);
+  if(idx >= 0) arr[idx] = meta; else arr.unshift(meta);
+  writeProjects(arr);
+  try {
+    const rv = await cloudApi("/api/projects/" + id + "/video");
+    const vb = await rv.blob();
+    await idbSet("video:" + id, vb);
+    meta.videoInDb = true;
+  } catch(e){ meta.videoInDb = false; }
+  try {
+    const rf = await cloudApi("/api/projects/" + id + "/final");
+    const fb = await rf.blob();
+    await idbSet("final:" + id, fb);
+    meta.finalInDb = true;
+  } catch(e){}
+  const arr2 = readProjects();
+  const i2 = arr2.findIndex(p => p.id === id);
+  if(i2 >= 0) arr2[i2] = meta;
+  writeProjects(arr2);
+  renderProjects();
+  setStatus($("cloudStatus"), "Projeto " + meta.name + " baixado. Ele está na lista de projetos salvos, toque em Editar nele.", "ok");
+}
+async function cloudDeleteProject(id){
+  await cloudApi("/api/projects/" + id, { method: "DELETE" });
+  const st = cloudStateAll();
+  delete st[id];
+  cloudStateSave(st);
+}
+async function cloudRenderList(){
+  const list = $("cloudList");
+  list.innerHTML = "";
+  setStatus($("cloudStatus"), "Buscando seus projetos na nuvem...");
+  const res = await cloudApi("/api/projects");
+  const data = await res.json();
+  const projects = data.projects || [];
+  if(!projects.length){ setStatus($("cloudStatus"), "A nuvem respondeu e ainda não tem nenhum projeto lá.", "ok"); return; }
+  setStatus($("cloudStatus"), projects.length + " projeto(s) na nuvem.", "ok");
+  const local = readProjects();
+  projects.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "seg";
+    const info = document.createElement("div");
+    info.className = "txt";
+    const d = new Date(p.updatedAt || 0);
+    const when = d.toLocaleDateString("pt-BR") + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    const hasLocal = local.some(x => x.id === p.id);
+    info.textContent = p.name + " (salvo na nuvem em " + when + ")." + (hasLocal ? " Já existe neste aparelho, baixar substitui a cópia daqui pela da nuvem." : " Não está neste aparelho.");
+    const btns = document.createElement("div");
+    btns.style.display = "flex"; btns.style.flexDirection = "column"; btns.style.gap = "6px";
+    const bDown = document.createElement("button");
+    bDown.className = "btn sec small"; bDown.style.width = "auto"; bDown.style.marginTop = "0"; bDown.textContent = "Baixar neste aparelho";
+    bDown.addEventListener("click", async () => {
+      try { await cloudDownloadProject(p.id); } catch(e){ setStatus($("cloudStatus"), "Nuvem: " + e.message, "err"); }
+    });
+    const bDel = document.createElement("button");
+    bDel.className = "btn sec small"; bDel.style.width = "auto"; bDel.style.marginTop = "0"; bDel.textContent = "Apagar da nuvem";
+    bDel.addEventListener("click", async () => {
+      try { await cloudDeleteProject(p.id); setStatus($("cloudStatus"), "Projeto apagado da nuvem.", "ok"); cloudRenderList(); }
+      catch(e){ setStatus($("cloudStatus"), "Nuvem: " + e.message, "err"); }
+    });
+    btns.appendChild(bDown); btns.appendChild(bDel);
+    div.appendChild(info); div.appendChild(btns);
+    list.appendChild(div);
+  });
+}
+$("cloudSaveKeyBtn").addEventListener("click", () => {
+  const v = $("cloudKey").value.trim();
+  if(!v){ setStatus($("cloudStatus"), "Digite o código primeiro.", "err"); return; }
+  store.set(CLOUD_KEY_NAME, v);
+  setStatus($("cloudStatus"), "Código guardado neste aparelho. Agora ele tenta enviar a cada salvamento.", "ok");
+  scheduleCloudSync();
+});
+$("cloudPushBtn").addEventListener("click", async () => {
+  if(!currentProjId){ setStatus($("cloudStatus"), "Abra ou envie um vídeo primeiro, para ter um projeto aberto.", "err"); return; }
+  try {
+    setStatus($("cloudStatus"), "Enviando o projeto aberto para a nuvem...");
+    await cloudPushProject(currentProjId, false);
+    setStatus($("cloudStatus"), "Projeto aberto enviado para a nuvem.", "ok");
+  } catch(e){ setStatus($("cloudStatus"), "Nuvem: " + e.message, "err"); }
+});
+$("cloudListBtn").addEventListener("click", async () => {
+  try { await cloudRenderList(); } catch(e){ setStatus($("cloudStatus"), "Nuvem: " + e.message, "err"); }
+});
+(function initCloud(){
+  const saved = cloudKey();
+  if(saved) $("cloudKey").value = saved;
+})();
 
 // ---------- início ----------
 ["capOn", "capSize", "previewCut"].forEach(id => $(id).addEventListener("change", scheduleSave));

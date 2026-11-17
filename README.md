@@ -34,3 +34,12 @@ então baixe sempre o vídeo final que for usar.
 5. Exportar. O resultado sai em WebM (ou MP4 em alguns navegadores) e há um botão para converter para MP4.
 
 Nunca coloque a chave da OpenAI dentro do código nem no repositório. Ela só vai no campo da página.
+
+## Nuvem na Cloudflare
+
+A página pode salvar os projetos também na nuvem da dona da conta Cloudflare:
+os dados dos projetos ficam num banco D1 e os arquivos de vídeo num depósito R2,
+protegidos por um código de acesso pessoal (variável ACCESS_KEY no projeto Pages).
+O código da API fica em functions/api, a referência da tabela em schema.sql, e os
+passos de ligação no painel estão em CLOUDFLARE-PASSOS.md. Sem as ligações feitas,
+a página segue salvando só no aparelho, sem quebrar nada.
