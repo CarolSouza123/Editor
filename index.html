@@ -72,6 +72,13 @@
     <p>Envie o vídeo, ele tira os silêncios, cria a legenda e você corta trechos pelo texto. Tudo roda no seu aparelho.</p>
   </header>
 
+  <section class="card hidden" id="projectsCard">
+    <h2>Meus projetos salvos</h2>
+    <p class="hint">Ficam salvos neste navegador, neste aparelho. Editar reabre o projeto para corrigir cortes e legenda e exportar de novo, mesmo depois de já exportado. Duplicar faz uma cópia para mexer sem estragar o original.</p>
+    <div class="seglist" id="projList"></div>
+    <div class="status" id="projStatus"></div>
+  </section>
+
   <section class="card" id="cardKey">
     <h2>1. Sua chave da OpenAI</h2>
     <p class="hint">Serve só para a legenda automática. A chave fica salva apenas neste aparelho, neste navegador. Sem chave, o corte de silêncios continua funcionando.</p>
@@ -91,6 +98,7 @@
     <input type="file" id="fileInput" accept="video/*" class="hidden">
     <video id="player" controls playsinline class="hidden"></video>
     <div class="status" id="fileStatus"></div>
+    <div class="status" id="saveStatus"></div>
   </section>
 
   <section class="card hidden" id="cardCut">
@@ -143,7 +151,7 @@
   </section>
 
   <footer>
-    Seu vídeo não sai do aparelho. A única coisa enviada para fora é o áudio, na hora da transcrição, para a OpenAI, usando a sua chave. O corte de silêncios e a exportação acontecem aqui dentro do navegador.
+    Seu vídeo não sai do aparelho. A única coisa enviada para fora é o áudio, na hora da transcrição, para a OpenAI, usando a sua chave. O corte de silêncios e a exportação acontecem aqui dentro do navegador. Os projetos salvos moram neste navegador, neste endereço de página: se limpar os dados do navegador ou mudar o endereço da página, eles não acompanham. Baixe sempre o vídeo final que for usar.
   </footer>
 </div>
 <script>
@@ -151,8 +159,144 @@
 const $ = id => document.getElementById(id);
 const store = {
   get(k){ try { return window.localStorage.getItem(k); } catch(e){ return null; } },
-  set(k,v){ try { window.localStorage.setItem(k,v); } catch(e){} }
+  set(k,v){ try { window.localStorage.setItem(k,v); } catch(e){} },
+  del(k){ try { window.localStorage.removeItem(k); } catch(e){} }
 };
+
+// ---------- memória: biblioteca de projetos (IndexedDB para os vídeos, navegador para os ajustes) ----------
+const PROJS_KEY = "cortaSilencio_projects_v2";
+function idbOpen(){
+  return new Promise((res, rej) => {
+    const rq = window.indexedDB.open("corta-silencio", 1);
+    rq.onupgradeneeded = () => { rq.result.createObjectStore("files"); };
+    rq.onsuccess = () => res(rq.result);
+    rq.onerror = () => rej(rq.error);
+  });
+}
+async function idbSet(key, value){
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").put(value, key);
+    tx.oncomplete = () => { db.close(); res(true); };
+    tx.onerror = () => { db.close(); rej(tx.error); };
+  });
+}
+async function idbGet(key){
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const rq = db.transaction("files", "readonly").objectStore("files").get(key);
+    rq.onsuccess = () => { db.close(); res(rq.result || null); };
+    rq.onerror = () => { db.close(); rej(rq.error); };
+  });
+}
+async function idbDel(key){
+  const db = await idbOpen();
+  return new Promise((res, rej) => {
+    const tx = db.transaction("files", "readwrite");
+    tx.objectStore("files").delete(key);
+    tx.oncomplete = () => { db.close(); res(true); };
+    tx.onerror = () => { db.close(); rej(tx.error); };
+  });
+}
+let currentProjId = null, videoInDb = false, finalInDb = false, saveTimer = null;
+function newProjId(){ return "p" + Date.now().toString(36) + Math.floor(Math.random() * 999).toString(36); }
+function readProjects(){
+  try { const raw = store.get(PROJS_KEY); const arr = raw ? JSON.parse(raw) : []; return Array.isArray(arr) ? arr : []; }
+  catch(e){ return []; }
+}
+function writeProjects(arr){ store.set(PROJS_KEY, JSON.stringify(arr)); }
+function scheduleSave(){
+  if(!S.file || !S.duration) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveProject, 700);
+}
+function saveProject(){
+  if(!S.file || !S.duration) return;
+  if(!currentProjId) currentProjId = newProjId();
+  const arr = readProjects();
+  const prev = arr.find(p => p.id === currentProjId);
+  const meta = {
+    id: currentProjId,
+    name: S.projName || (S.file.name || "Vídeo").replace(/\.[^.]+$/, ""),
+    createdAt: prev ? prev.createdAt : Date.now(),
+    updatedAt: Date.now(),
+    fileName: S.file.name || "video.mp4", fileSize: S.file.size || 0, fileType: S.file.type || "video/mp4",
+    duration: S.duration,
+    thr: $("thr").value, minSil: $("minSil").value, pad: $("pad").value,
+    silences: S.silences, baseKept: S.baseKept, excluded: Array.from(S.excludedSegs),
+    cues: S.cues, capOn: $("capOn").checked, capSize: $("capSize").value,
+    previewCut: $("previewCut").checked,
+    videoInDb: videoInDb, finalInDb: finalInDb, finalIsMp4: !!S.finalIsMp4
+  };
+  const idx = arr.findIndex(p => p.id === currentProjId);
+  if(idx >= 0) arr[idx] = meta; else arr.unshift(meta);
+  writeProjects(arr);
+  const d = new Date(meta.updatedAt);
+  const hh = String(d.getHours()).padStart(2, "0"), mm = String(d.getMinutes()).padStart(2, "0");
+  setStatus($("saveStatus"), "Projeto salvo neste aparelho às " + hh + ":" + mm + ". Pode fechar e continuar depois.", "ok");
+  renderProjects();
+}
+async function deleteProject(id){
+  writeProjects(readProjects().filter(p => p.id !== id));
+  try { await idbDel("video:" + id); await idbDel("final:" + id); } catch(e){}
+  if(id === currentProjId){ location.reload(); return; }
+  renderProjects();
+  setStatus($("projStatus"), "Projeto apagado.", "ok");
+}
+async function duplicateProject(id){
+  const arr = readProjects();
+  const src = arr.find(p => p.id === id);
+  if(!src) return;
+  const nid = newProjId();
+  const copy = JSON.parse(JSON.stringify(src));
+  copy.id = nid;
+  copy.name = src.name + " cópia";
+  copy.createdAt = Date.now(); copy.updatedAt = Date.now();
+  try {
+    const v = await idbGet("video:" + id);
+    if(v){ await idbSet("video:" + nid, v); copy.videoInDb = true; } else copy.videoInDb = false;
+    const f = await idbGet("final:" + id);
+    if(f){ await idbSet("final:" + nid, f); copy.finalInDb = true; } else copy.finalInDb = false;
+  } catch(e){ copy.videoInDb = false; }
+  arr.unshift(copy);
+  writeProjects(arr);
+  renderProjects();
+  setStatus($("projStatus"), "Cópia criada: " + copy.name + ". Toque em Editar nela para mexer sem tocar no original.", "ok");
+}
+function renderProjects(){
+  const arr = readProjects();
+  const card = $("projectsCard"), list = $("projList");
+  if(!arr.length){ card.classList.add("hidden"); list.innerHTML = ""; return; }
+  card.classList.remove("hidden");
+  list.innerHTML = "";
+  arr.forEach(p => {
+    const div = document.createElement("div");
+    div.className = "seg";
+    const info = document.createElement("div");
+    info.className = "txt";
+    const d = new Date(p.updatedAt);
+    const when = d.toLocaleDateString("pt-BR") + " " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    let extra = "";
+    if(p.cues && p.cues.length) extra += " Com legenda.";
+    if(p.finalInDb) extra += " Já exportado.";
+    info.textContent = p.name + " (" + fmt(p.duration || 0) + ", " + ((p.fileSize || 0) / 1048576).toFixed(1) + " MB, salvo em " + when + ")." + extra;
+    const mk = (label, fn, primary) => {
+      const b = document.createElement("button");
+      b.className = "btn " + (primary ? "" : "sec ") + "small";
+      b.style.width = "auto"; b.style.marginTop = "0"; b.textContent = label;
+      b.addEventListener("click", fn);
+      return b;
+    };
+    const btns = document.createElement("div");
+    btns.style.display = "flex"; btns.style.flexDirection = "column"; btns.style.gap = "6px";
+    btns.appendChild(mk("Editar", () => loadProject(p.id), true));
+    btns.appendChild(mk("Duplicar", () => duplicateProject(p.id), false));
+    btns.appendChild(mk("Apagar", () => deleteProject(p.id), false));
+    div.appendChild(info); div.appendChild(btns);
+    list.appendChild(div);
+  });
+}
 
 // ===LOGICA PURA INICIO===
 function rmsWindows(samples, sampleRate, winSec){
@@ -270,7 +414,8 @@ const S = {
   mono: null, sampleRate: 0, windows: null,
   silences: [], baseKept: [], excludedSegs: new Set(),
   cues: [], webmBlob: null, exporting: false,
-  mediaSrcNode: null, audioDest: null, audioCtx: null
+  mediaSrcNode: null, audioDest: null, audioCtx: null,
+  projName: "", finalIsMp4: false, pendingMeta: null
 };
 
 function fmt(t){
@@ -325,14 +470,39 @@ player.addEventListener("timeupdate", () => {
 });
 
 async function loadFile(f){
-  S.file = f; S.cues = []; S.excludedSegs = new Set(); S.webmBlob = null;
+  if(S.pendingMeta){
+    const meta = S.pendingMeta;
+    S.pendingMeta = null;
+    currentProjId = meta.id;
+    videoInDb = false; finalInDb = !!meta.finalInDb; S.finalIsMp4 = !!meta.finalIsMp4;
+    await setupVideo(f, meta);
+    try { await idbSet("video:" + meta.id, f); videoInDb = true; saveProject(); } catch(e){}
+    return;
+  }
+  currentProjId = newProjId();
+  videoInDb = false; finalInDb = false; S.finalIsMp4 = false;
+  S.projName = (f.name || "Vídeo").replace(/\.[^.]+$/, "");
+  await setupVideo(f, null);
+  if(S.duration){
+    try { await idbSet("video:" + currentProjId, f); videoInDb = true; saveProject(); }
+    catch(e){ setStatus($("saveStatus"), "Não coube salvar o vídeo neste aparelho, mas os ajustes ficam salvos e ele pede o vídeo de novo ao reabrir.", "err"); scheduleSave(); }
+  }
+}
+
+async function setupVideo(f, meta){
+  S.file = f; S.webmBlob = null;
+  S.cues = meta && meta.cues ? meta.cues : [];
+  S.excludedSegs = new Set(meta && meta.excluded ? meta.excluded : []);
+  if(meta) S.projName = meta.name || S.projName;
   $("cueList").innerHTML = ""; $("downloads").innerHTML = ""; $("mp4Downloads").innerHTML = "";
   $("mp4Btn").classList.add("hidden");
+  $("srtBtn").classList.add("hidden");
   if(S.url) URL.revokeObjectURL(S.url);
   S.url = URL.createObjectURL(f);
   player.src = S.url;
   player.classList.remove("hidden");
-  setStatus($("fileStatus"), f.name + ", " + (f.size / 1048576).toFixed(1) + " MB. Lendo o áudio...");
+  const nome = f.name || (meta ? meta.fileName : "vídeo");
+  setStatus($("fileStatus"), nome + ", " + (f.size / 1048576).toFixed(1) + " MB. Lendo o áudio...");
   try {
     const buf = await f.arrayBuffer();
     const AC = window.AudioContext || window.webkitAudioContext;
@@ -347,13 +517,64 @@ async function loadFile(f){
     }
     S.mono = mono; S.sampleRate = audio.sampleRate; S.windows = null;
     S.duration = audio.duration;
-    setStatus($("fileStatus"), f.name + ", " + (f.size / 1048576).toFixed(1) + " MB, duração " + fmt(S.duration) + ".", "ok");
+    setStatus($("fileStatus"), nome + ", " + (f.size / 1048576).toFixed(1) + " MB, duração " + fmt(S.duration) + ".", "ok");
     $("cardCut").classList.remove("hidden");
     $("cardCap").classList.remove("hidden");
     $("cardExport").classList.remove("hidden");
-    analyze();
+    if(meta){
+      $("thr").value = meta.thr; $("minSil").value = meta.minSil; $("pad").value = meta.pad;
+      sliderLabels();
+      S.silences = meta.silences || [];
+      S.baseKept = meta.baseKept && meta.baseKept.length ? meta.baseKept : buildKept(S.duration, S.silences);
+      $("capOn").checked = !!meta.capOn;
+      $("capSize").value = meta.capSize || "0.058";
+      $("previewCut").checked = !!meta.previewCut;
+      if(S.cues.length){ renderCues(); $("srtBtn").classList.remove("hidden"); }
+      renderAllCut();
+      setStatus($("cutStatus"), "Projeto reaberto do jeito que você salvou. Pode corrigir e exportar de novo.", "ok");
+      if(meta.finalInDb) restoreFinalDownload(meta);
+    } else {
+      analyze();
+    }
   } catch(err){
     setStatus($("fileStatus"), "Não consegui ler o áudio deste vídeo. Tente outro arquivo, de preferência MP4.", "err");
+  }
+}
+
+async function restoreFinalDownload(meta){
+  try {
+    const blob = await idbGet("final:" + meta.id);
+    if(!blob) return;
+    const isMp4 = !!meta.finalIsMp4;
+    S.webmBlob = isMp4 ? null : blob;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = isMp4 ? "video-final.mp4" : "video-final.webm";
+    a.className = "btn dl";
+    a.textContent = "Baixar o vídeo final já exportado (" + (blob.size / 1048576).toFixed(1) + " MB)";
+    $("downloads").appendChild(a);
+    if(!isMp4) $("mp4Btn").classList.remove("hidden");
+    setStatus($("exportStatus"), "Este projeto já tinha um vídeo final exportado, ele está no botão acima. Se corrigir algo, exporte de novo para gerar a versão nova.", "ok");
+  } catch(e){}
+}
+
+async function loadProject(id){
+  const meta = readProjects().find(p => p.id === id);
+  if(!meta) return;
+  currentProjId = meta.id;
+  videoInDb = !!meta.videoInDb; finalInDb = !!meta.finalInDb; S.finalIsMp4 = !!meta.finalIsMp4;
+  setStatus($("projStatus"), "Abrindo " + meta.name + "...", "");
+  let blob = null;
+  try { blob = await idbGet("video:" + id); } catch(e){}
+  if(blob){
+    const f = new File([blob], meta.fileName || "video.mp4", { type: meta.fileType || "video/mp4" });
+    await setupVideo(f, meta);
+    setStatus($("projStatus"), "Projeto aberto: " + meta.name + ".", "ok");
+  } else {
+    S.pendingMeta = meta;
+    setStatus($("fileStatus"), "Este projeto não tem o vídeo guardado neste aparelho. Toque em escolher o vídeo e selecione o mesmo arquivo: " + meta.fileName + " (" + ((meta.fileSize || 0) / 1048576).toFixed(1) + " MB). Os cortes e a legenda voltam sozinhos.", "err");
+    $("fileBox").scrollIntoView({ behavior: "smooth" });
+    setStatus($("projStatus"), "Falta só selecionar o vídeo original de novo, os ajustes estão salvos.", "");
   }
 }
 
@@ -377,6 +598,7 @@ function analyze(){
   renderAllCut();
   const cutSec = S.duration - totalDuration(finalKept());
   setStatus($("cutStatus"), S.silences.length + " silêncios encontrados. " + fmt(cutSec) + " saem do vídeo.", "ok");
+  scheduleSave();
 }
 function renderAllCut(){
   drawWave(); renderSegs(); updateStats();
@@ -426,6 +648,7 @@ function renderSegs(){
     chk.addEventListener("change", () => {
       if(chk.checked) S.excludedSegs.delete(i); else S.excludedSegs.add(i);
       renderAllCut();
+      scheduleSave();
     });
     const t = document.createElement("span"); t.className = "t"; t.textContent = fmt(r.start) + " a " + fmt(r.end);
     const txt = document.createElement("span"); txt.className = "txt"; txt.textContent = "Trecho " + (i + 1) + ", " + fmt(r.end - r.start);
@@ -525,6 +748,7 @@ $("transcribeBtn").addEventListener("click", async () => {
     if(!S.cues.length){ setStatus($("transStatus"), "A transcrição voltou vazia. Confira se o vídeo tem fala audível.", "err"); btn.disabled = false; return; }
     renderCues();
     renderAllCut();
+    saveProject();
     $("srtBtn").classList.remove("hidden");
     const cost = (S.duration / 60 * 0.006);
     setStatus($("transStatus"), "Pronto, " + S.cues.length + " frases transcritas. Custo estimado desta transcrição: US$ " + cost.toFixed(3) + ".", "ok");
@@ -545,13 +769,14 @@ function renderCues(){
       cue.cut = !chk.checked;
       div.classList.toggle("cut", cue.cut);
       renderAllCut();
+      scheduleSave();
     });
     const t = document.createElement("span"); t.className = "t"; t.textContent = fmt(cue.start);
     t.style.cursor = "pointer";
     t.addEventListener("click", () => { player.currentTime = cue.start; player.play(); });
     const ta = document.createElement("textarea");
     ta.value = cue.text; ta.rows = 2;
-    ta.addEventListener("input", () => { cue.text = ta.value; });
+    ta.addEventListener("input", () => { cue.text = ta.value; scheduleSave(); });
     const wrap = document.createElement("div"); wrap.className = "txt"; wrap.appendChild(ta);
     div.appendChild(chk); div.appendChild(t); div.appendChild(wrap);
     list.appendChild(div);
@@ -725,6 +950,11 @@ async function exportVideo(){
   a.className = "btn dl";
   a.textContent = "Baixar vídeo final, " + fmt(totalOut) + " (" + (blob.size / 1048576).toFixed(1) + " MB)";
   $("downloads").appendChild(a);
+  S.finalIsMp4 = isMp4;
+  if(currentProjId){
+    try { await idbSet("final:" + currentProjId, blob); finalInDb = true; } catch(e){}
+    saveProject();
+  }
   setStatus($("exportStatus"), "Pronto. Vídeo final com " + fmt(totalOut) + ", contra " + fmt(S.duration) + " do original.", "ok");
   if(!isMp4) $("mp4Btn").classList.remove("hidden");
 }
@@ -768,12 +998,21 @@ $("mp4Btn").addEventListener("click", async () => {
     a.className = "btn dl";
     a.textContent = "Baixar vídeo final em MP4 (" + (blob.size / 1048576).toFixed(1) + " MB)";
     $("mp4Downloads").appendChild(a);
+    S.finalIsMp4 = true; S.webmBlob = null;
+    if(currentProjId){
+      try { await idbSet("final:" + currentProjId, blob); finalInDb = true; } catch(e){}
+      saveProject();
+    }
     setStatus($("mp4Status"), "MP4 pronto, é o botão que apareceu acima.", "ok");
   } catch(err){
     setStatus($("mp4Status"), "A conversão para MP4 falhou neste aparelho. O arquivo WebM acima continua valendo e abre no celular e no YouTube.", "err");
   }
   btn.disabled = false;
 });
+
+// ---------- início ----------
+["capOn", "capSize", "previewCut"].forEach(id => $(id).addEventListener("change", scheduleSave));
+renderProjects();
 </script>
 </body>
 </html>

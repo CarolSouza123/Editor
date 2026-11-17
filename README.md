@@ -14,6 +14,17 @@ A única saída é o áudio na hora da transcrição, direto para a OpenAI com a
    - Ou Cloudflare Pages conectando o repositório, como no LinkFacil (build command vazio, output `/`).
 4. Abrir o link gerado no celular e usar. Dá para adicionar à tela inicial.
 
+## Memória e projetos
+
+Cada vídeo vira um projeto salvo automaticamente no navegador daquele aparelho, naquele
+endereço de página: ajustes de corte, legenda transcrita e editada, vídeo original e,
+depois de exportar, o vídeo final. Dá para fechar e continuar depois sem transcrever
+de novo. Na lista "Meus projetos salvos": Editar reabre o projeto para corrigir e
+exportar de novo (inclusive depois de já exportado), Duplicar cria uma cópia
+independente e Apagar remove o projeto e os arquivos dele do navegador.
+Limpar os dados do navegador ou trocar o endereço da página apaga os projetos salvos,
+então baixe sempre o vídeo final que for usar.
+
 ## Uso
 
 1. Colar a chave da OpenAI no passo 1 da página e salvar (fica só naquele aparelho).
